@@ -1,7 +1,7 @@
 package com.goticks
 
 import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
-import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import akka.util.Timeout
 
@@ -26,70 +26,74 @@ object BoxOffice {
   case class EventCreated(event: Event) extends EventResponse
   case object EventExists               extends EventResponse
 
-  def apply()(implicit timeout: Timeout, system: ActorSystem[_]): Behavior[Command] = {
-    implicit val ec: ExecutionContext = system.executionContext
-
-    def updated(children: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] = {
-      Behaviors.receive { (context, message) =>
-        message match {
-          case CreateEvent(name, tickets, replyTo) =>
-            children.get(name) match {
-              case Some(_) =>
-                replyTo ! EventExists
-                Behaviors.same
-              case None =>
-                val eventTickets = context.spawn(TicketSeller(name), name)
-                val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply).toVector
-                eventTickets ! TicketSeller.Add(newTickets)
-                replyTo ! EventCreated(Event(name, tickets))
-                updated(children + (name -> eventTickets))
-            }
-
-          case GetTickets(event, tickets, replyTo) =>
-            def notFound(): Unit = replyTo ! TicketSeller.Tickets(event)
-            def buy(child: ActorRef[TicketSeller.Command]): Unit =
-              child ! TicketSeller.Buy(tickets, replyTo)
-
-            children.get(event).fold(notFound())(buy)
-            Behaviors.same
-
-          case GetEvent(event, replyTo) =>
-            def notFound(): Unit = replyTo ! None
-            def getEvent(child: ActorRef[TicketSeller.Command]): Unit = {
-              child ! TicketSeller.GetEvent(replyTo)
-            }
-
-            children.get(event).fold(notFound())(getEvent)
-            Behaviors.same
-
-          case GetEvents(replyTo) =>
-            def getEvents: Iterable[Future[Option[Event]]] =
-              children.values.map { child =>
-                context.self.ask[Option[Event]](GetEvent(child.path.name, _))
-              }
-            def convertToEvents(
-                f: Future[Iterable[Option[Event]]]
-            ): Future[Events] = {
-              val aa = f.map(_.flatten)
-              val bb = aa.map(l => Events(l.toVector))
-              bb
-            }
-
-            convertToEvents(Future.sequence(getEvents)).foreach { replyTo ! _ }
-            Behaviors.same
-
-          case CancelEvent(event, replyTo) =>
-            def notFound(): Unit = replyTo ! None
-            def cancelEvent(child: ActorRef[TicketSeller.Command]): Unit = {
-              child ! TicketSeller.Cancel(replyTo)
-            }
-            children.get(event).fold(notFound())(cancelEvent)
-            Behaviors.same
-        }
-
-      }
+  def apply()(implicit timeout: Timeout): Behavior[Command] =
+    Behaviors.setup { context =>
+      new BoxOffice(context).updated(Map.empty)
     }
 
-    updated(Map.empty)
-  }
+}
+
+class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit timeout: Timeout) {
+  import BoxOffice._
+
+  implicit val system: ActorSystem[_] = context.system
+  implicit val ec: ExecutionContext   = system.executionContext
+
+  def updated(children: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
+    Behaviors.receiveMessage {
+      case CreateEvent(name, tickets, replyTo) =>
+        children.get(name) match {
+          case Some(_) =>
+            replyTo ! EventExists
+            Behaviors.same
+          case None =>
+            val eventTickets = context.spawn(TicketSeller(name), name)
+            val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply).toVector
+            eventTickets ! TicketSeller.Add(newTickets)
+            replyTo ! EventCreated(Event(name, tickets))
+            updated(children + (name -> eventTickets))
+        }
+
+      case GetTickets(event, tickets, replyTo) =>
+        def notFound(): Unit = replyTo ! TicketSeller.Tickets(event)
+        def buy(child: ActorRef[TicketSeller.Command]): Unit =
+          child ! TicketSeller.Buy(tickets, replyTo)
+
+        children.get(event).fold(notFound())(buy)
+        Behaviors.same
+
+      case GetEvent(event, replyTo) =>
+        def notFound(): Unit = replyTo ! None
+        def getEvent(child: ActorRef[TicketSeller.Command]): Unit = {
+          child ! TicketSeller.GetEvent(replyTo)
+        }
+
+        children.get(event).fold(notFound())(getEvent)
+        Behaviors.same
+
+      case GetEvents(replyTo) =>
+        def getEvents: Iterable[Future[Option[Event]]] =
+          children.keys.map { event =>
+            context.self.ask[Option[Event]](GetEvent(event, _))
+          }
+        def convertToEvents(
+            f: Future[Iterable[Option[Event]]]
+        ): Future[Events] = {
+          val aa = f.map(_.flatten)
+          val bb = aa.map(l => Events(l.toVector))
+          bb
+        }
+        convertToEvents(Future.sequence(getEvents)).foreach { replyTo ! _ }
+        Behaviors.same
+
+      case CancelEvent(event, replyTo) =>
+        children.get(event) match {
+          case Some(child) =>
+            child ! TicketSeller.Cancel(replyTo)
+            updated(children - event)
+          case None =>
+            replyTo ! None
+            Behaviors.same
+        }
+    }
 }

@@ -11,9 +11,8 @@ import akka.util.Timeout
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class RestApi(context: ActorContext[_], timeout: Timeout)(implicit
-    val system: ActorSystem[_]
-) extends RestRoutes {
+class RestApi(context: ActorContext[_], timeout: Timeout) extends RestRoutes {
+  implicit val system: ActorSystem[_]  = context.system
   implicit val requestTimeout: Timeout = timeout
 
   val boxOffice: ActorRef[BoxOffice.Command] = context.spawn(BoxOffice(), BoxOffice.name)
@@ -88,7 +87,7 @@ trait BoxOfficeApi {
 
   implicit def system: ActorSystem[_]
   implicit def requestTimeout: Timeout
-  implicit val executionContext: ExecutionContext = system.executionContext
+  implicit lazy val executionContext: ExecutionContext = system.executionContext
 
   def boxOffice: ActorRef[BoxOffice.Command]
 
