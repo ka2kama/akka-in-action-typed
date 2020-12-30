@@ -22,7 +22,7 @@ class TicketSellerSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
       nrs.foreach(_ => ticketingActor ! Buy(1, probe.ref))
 
       val tickets = probe.receiveMessages(9)
-      tickets.zip(nrs).foreach { case (Tickets(event, Vector(Ticket(id))), ix) => id should be(ix) }
+      tickets.zip(nrs).foreach { case (Tickets(_, Vector(Ticket(id))), ix) => id should be(ix) }
 
       ticketingActor ! Buy(1, probe.ref)
       probe.expectMessage(Tickets(event))
@@ -52,7 +52,7 @@ class TicketSellerSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
 
       val tickets = probe.receiveMessages(nrBatches)
 
-      tickets.zip(batches).foreach { case (Tickets(event, bought), ix) =>
+      tickets.zip(batches).foreach { case (Tickets(_, bought), ix) =>
         bought.size should equal(secondBatchSize)
         val last  = ix * secondBatchSize + firstBatchSize
         val first = ix * secondBatchSize + firstBatchSize - (secondBatchSize - 1)
