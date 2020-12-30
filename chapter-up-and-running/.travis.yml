@@ -1,0 +1,7 @@
+language: scala
+scala:
+  - 2.13.4
+jdk: openjdk11
+
+script:
+  - sbt clean compile test

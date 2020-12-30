@@ -39,10 +39,10 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
   implicit val system: ActorSystem[_] = context.system
   implicit val ec: ExecutionContext   = system.executionContext
 
-  def updated(children: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
+  def updated(eventNameToActor: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
     Behaviors.receiveMessage {
       case CreateEvent(name, tickets, replyTo) =>
-        children.get(name) match {
+        eventNameToActor.get(name) match {
           case Some(_) =>
             replyTo ! EventExists
             Behaviors.same
@@ -51,7 +51,7 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
             val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply).toVector
             eventTickets ! TicketSeller.Add(newTickets)
             replyTo ! EventCreated(Event(name, tickets))
-            updated(children + (name -> eventTickets))
+            updated(eventNameToActor + (name -> eventTickets))
         }
 
       case GetTickets(event, tickets, replyTo) =>
@@ -59,7 +59,7 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
         def buy(child: ActorRef[TicketSeller.Command]): Unit =
           child ! TicketSeller.Buy(tickets, replyTo)
 
-        children.get(event).fold(notFound())(buy)
+        eventNameToActor.get(event).fold(notFound())(buy)
         Behaviors.same
 
       case GetEvent(event, replyTo) =>
@@ -68,12 +68,12 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
           child ! TicketSeller.GetEvent(replyTo)
         }
 
-        children.get(event).fold(notFound())(getEvent)
+        eventNameToActor.get(event).fold(notFound())(getEvent)
         Behaviors.same
 
       case GetEvents(replyTo) =>
         def getEvents: Iterable[Future[Option[Event]]] =
-          children.keys.map { event =>
+          eventNameToActor.keys.map { event =>
             context.self.ask[Option[Event]](GetEvent(event, _))
           }
         def convertToEvents(
@@ -87,10 +87,10 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
         Behaviors.same
 
       case CancelEvent(event, replyTo) =>
-        children.get(event) match {
-          case Some(child) =>
-            child ! TicketSeller.Cancel(replyTo)
-            updated(children - event)
+        eventNameToActor.get(event) match {
+          case Some(seller) =>
+            seller ! TicketSeller.Cancel(replyTo)
+            updated(eventNameToActor - event)
           case None =>
             replyTo ! None
             Behaviors.same
