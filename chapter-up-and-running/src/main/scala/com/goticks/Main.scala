@@ -42,7 +42,7 @@ object Main extends App with RequestTimeout {
     Behaviors.empty
   }
 
-  val _ = ActorSystem(rootBehavior, "go-ticks")
+  ActorSystem(rootBehavior, "go-ticks")
 }
 
 trait RequestTimeout {

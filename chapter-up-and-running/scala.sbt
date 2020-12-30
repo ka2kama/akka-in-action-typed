@@ -1,4 +1,4 @@
-scalaVersion := "2.12.3"
+scalaVersion := "2.13.4"
 
 scalacOptions ++= Seq(
   "-deprecation",
@@ -7,5 +7,5 @@ scalacOptions ++= Seq(
   "-Ywarn-unused",
   "-Ywarn-dead-code",
   "-feature",
-  "-language:_"
+  "-language:_",
 )

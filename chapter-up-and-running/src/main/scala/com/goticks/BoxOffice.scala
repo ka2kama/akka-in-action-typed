@@ -28,7 +28,7 @@ object BoxOffice {
 
   def apply()(implicit timeout: Timeout): Behavior[Command] =
     Behaviors.setup { context =>
-      new BoxOffice(context).updated(Map.empty)
+      new BoxOffice(context).init()
     }
 
 }
@@ -39,46 +39,52 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
   implicit val system: ActorSystem[_] = context.system
   implicit val ec: ExecutionContext   = system.executionContext
 
-  def updated(eventNameToActor: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
+  def init(): Behavior[Command] = next(Map.empty)
+
+  def next(eventNameToSeller: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
     Behaviors.receiveMessage {
       case CreateEvent(name, tickets, replyTo) =>
-        eventNameToActor.get(name) match {
-          case Some(_) =>
-            replyTo ! EventExists
-            Behaviors.same
-          case None =>
-            val eventTickets = context.spawn(TicketSeller(name), name)
-            val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply).toVector
-            eventTickets ! TicketSeller.Add(newTickets)
-            replyTo ! EventCreated(Event(name, tickets))
-            updated(eventNameToActor + (name -> eventTickets))
+        def create(): Behavior[Command] = {
+          val eventTickets = context.spawn(TicketSeller(name), name)
+          val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply)
+          eventTickets ! TicketSeller.Add(newTickets)
+          replyTo ! EventCreated(Event(name, tickets))
+          next(eventNameToSeller + (name -> eventTickets))
         }
+        def eventExists(): Behavior[Command] = {
+          replyTo ! EventExists
+          Behaviors.same
+        }
+        eventNameToSeller.get(name).fold(create())(_ => eventExists())
 
       case GetTickets(event, tickets, replyTo) =>
-        def notFound(): Unit = replyTo ! TicketSeller.Tickets(event)
-        def buy(child: ActorRef[TicketSeller.Command]): Unit =
+        def notFound(): Behavior[Command] = {
+          replyTo ! TicketSeller.Tickets(event)
+          Behaviors.same
+        }
+        def buy(child: ActorRef[TicketSeller.Command]): Behavior[Command] = {
           child ! TicketSeller.Buy(tickets, replyTo)
-
-        eventNameToActor.get(event).fold(notFound())(buy)
-        Behaviors.same
+          Behaviors.same
+        }
+        eventNameToSeller.get(event).fold(notFound())(buy)
 
       case GetEvent(event, replyTo) =>
-        def notFound(): Unit = replyTo ! None
-        def getEvent(child: ActorRef[TicketSeller.Command]): Unit = {
-          child ! TicketSeller.GetEvent(replyTo)
+        def notFound(): Behavior[Command] = {
+          replyTo ! None
+          Behaviors.same
         }
-
-        eventNameToActor.get(event).fold(notFound())(getEvent)
-        Behaviors.same
+        def getEvent(child: ActorRef[TicketSeller.Command]): Behavior[Command] = {
+          child ! TicketSeller.GetEvent(replyTo)
+          Behaviors.same
+        }
+        eventNameToSeller.get(event).fold(notFound())(getEvent)
 
       case GetEvents(replyTo) =>
         def getEvents: Iterable[Future[Option[Event]]] =
-          eventNameToActor.keys.map { event =>
+          eventNameToSeller.keys.map { event =>
             context.self.ask[Option[Event]](GetEvent(event, _))
           }
-        def convertToEvents(
-            f: Future[Iterable[Option[Event]]]
-        ): Future[Events] = {
+        def convertToEvents(f: Future[Iterable[Option[Event]]]): Future[Events] = {
           val aa = f.map(_.flatten)
           val bb = aa.map(l => Events(l.toVector))
           bb
@@ -87,13 +93,14 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
         Behaviors.same
 
       case CancelEvent(event, replyTo) =>
-        eventNameToActor.get(event) match {
-          case Some(seller) =>
-            seller ! TicketSeller.Cancel(replyTo)
-            updated(eventNameToActor - event)
-          case None =>
-            replyTo ! None
-            Behaviors.same
+        def notFound(): Behavior[Command] = {
+          replyTo ! None
+          Behaviors.same
         }
+        def cancelEvent(seller: ActorRef[TicketSeller.Command]): Behavior[Command] = {
+          seller ! TicketSeller.Cancel(replyTo)
+          next(eventNameToSeller - event)
+        }
+        eventNameToSeller.get(event).fold(notFound())(cancelEvent)
     }
 }

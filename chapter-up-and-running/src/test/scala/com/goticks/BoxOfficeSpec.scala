@@ -36,9 +36,9 @@ class BoxOfficeSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
       val probe     = createTestProbe[BoxOffice.EventResponse]()
       val boxOffice = spawn(BoxOffice())
 
-      val tickets         = 3
-      val eventName       = "RHCP"
-      val expectedTickets = (1 to tickets).map(Ticket).toVector
+      val tickets   = 3
+      val eventName = "RHCP"
+      //val expectedTickets = (1 to tickets).map(Ticket).toVector
       boxOffice ! CreateEvent(eventName, tickets, probe.ref)
       //expectMsg(Add(expectedTickets))
       probe.expectMessage(EventCreated(Event(eventName, tickets)))
