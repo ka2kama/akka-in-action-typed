@@ -8,12 +8,12 @@ case class Photo(license: String, speed: Int)
 object SpeedFilter {
   def apply(minSpeed: Int, pipe: ActorRef[Photo]): Behavior[Photo] =
     Behaviors.setup { _ =>
-      new SpeedFilter(minSpeed, pipe).init()
+      new SpeedFilter(minSpeed, pipe).receive()
     }
 }
 
 class SpeedFilter private (minSpeed: Int, pipe: ActorRef[Photo]) {
-  def init(): Behavior[Photo] = Behaviors.receiveMessage { msg =>
+  def receive(): Behavior[Photo] = Behaviors.receiveMessage { msg =>
     if (msg.speed > minSpeed) {
       pipe ! msg
     }
@@ -24,12 +24,12 @@ class SpeedFilter private (minSpeed: Int, pipe: ActorRef[Photo]) {
 object LicenseFilter {
   def apply(pipe: ActorRef[Photo]): Behavior[Photo] =
     Behaviors.setup { _ =>
-      new LicenseFilter(pipe).init()
+      new LicenseFilter(pipe).receive()
     }
 }
 
-class LicenseFilter private (pipe: ActorRef[Photo]) {
-  def init(): Behavior[Photo] = Behaviors.receiveMessage { msg =>
+private class LicenseFilter(pipe: ActorRef[Photo]) {
+  def receive(): Behavior[Photo] = Behaviors.receiveMessage { msg =>
     if (msg.license.nonEmpty) {
       pipe ! msg
     }

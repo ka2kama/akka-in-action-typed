@@ -83,7 +83,7 @@ object Aggregator {
     Behaviors
       .supervise[PhotoCommand] {
         Behaviors.setup { context =>
-          new Aggregator(context, timeout, pipe).init()
+          new Aggregator(context, timeout, pipe).receive(Map.empty)
         }
       }
       .onFailure(SupervisorStrategy.restart)
@@ -95,9 +95,7 @@ class Aggregator private (
     pipe: ActorRef[PhotoCommand],
 ) {
 
-  def init(): Behavior[PhotoCommand] = next(Map.empty)
-
-  def next(messages: Map[String, PhotoMessage]): Behavior[PhotoCommand] =
+  def receive(messages: Map[String, PhotoMessage]): Behavior[PhotoCommand] =
     Behaviors
       .receiveMessage[PhotoCommand] {
         case rcvMsg: PhotoMessage =>
@@ -111,16 +109,16 @@ class Aggregator private (
               )
               pipe ! newCombinedMsg
               //cleanup message
-              next(messages - alreadyRcvMsg.id)
+              receive(messages - alreadyRcvMsg.id)
             case None =>
               context.scheduleOnce(timeout, context.self, TimeoutMessage(rcvMsg))
-              next(messages + (rcvMsg.id -> rcvMsg))
+              receive(messages + (rcvMsg.id -> rcvMsg))
           }
         case TimeoutMessage(rcvMsg) =>
           messages.get(rcvMsg.id) match {
             case Some(alreadyRcvMsg) =>
               pipe ! alreadyRcvMsg
-              next(messages - alreadyRcvMsg.id)
+              receive(messages - alreadyRcvMsg.id)
             case None => //message is already processed
               Behaviors.same
           }
@@ -129,6 +127,6 @@ class Aggregator private (
       }
       .receiveSignal { case (_, PreRestart) =>
         messages.values.foreach(context.self ! _)
-        init()
+        receive(Map.empty)
       }
 }
