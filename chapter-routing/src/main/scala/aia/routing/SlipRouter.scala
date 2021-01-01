@@ -3,7 +3,6 @@ package aia.routing
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
 
-import scala.annotation.unused
 import scala.collection.mutable.ListBuffer
 
 object CarOptions extends Enumeration {
@@ -28,48 +27,28 @@ trait RouteSlip {
   ): Unit = nextTasks.routeSlip match {
     case Nil => nextTasks.endStep ! progress
     case nextTask :: newSlip =>
-      nextTask ! RouteSlipMessage(nextTasks.copy(routeSlip = newSlip), progress = progress)
+      nextTask ! RouteSlipMessage(nextTasks.copy(routeSlip = newSlip), progress)
   }
 }
 
-object PaintCar {
-  def apply(color: String): Behavior[RouteSlipMessage] = Behaviors.setup { context =>
-    new PaintCar(context, color).receive()
-  }
-}
-
-class PaintCar private (@unused context: ActorContext[RouteSlipMessage], color: String)
-    extends RouteSlip {
-  def receive(): Behavior[RouteSlipMessage] = Behaviors.receiveMessage {
+object PaintCar extends RouteSlip {
+  def apply(color: String): Behavior[RouteSlipMessage] = Behaviors.receiveMessage {
     case RouteSlipMessage(nextTasks, car: Car) =>
       sendMessageToNextTask(nextTasks, car.copy(color = color))
       Behaviors.same
   }
 }
 
-object AddNavigation {
-  def apply(): Behavior[RouteSlipMessage] = Behaviors.setup { context =>
-    new AddNavigation(context).receive()
-  }
-}
-
-class AddNavigation private (@unused context: ActorContext[RouteSlipMessage]) extends RouteSlip {
-  def receive(): Behavior[RouteSlipMessage] = Behaviors.receiveMessage {
+object AddNavigation extends RouteSlip {
+  def apply(): Behavior[RouteSlipMessage] = Behaviors.receiveMessage {
     case RouteSlipMessage(nextTasks, car: Car) =>
       sendMessageToNextTask(nextTasks, car.copy(hasNavigation = true))
       Behaviors.same
   }
 }
 
-object AddParkingSensors {
-  def apply(): Behavior[RouteSlipMessage] = Behaviors.setup { context =>
-    new AddParkingSensors(context).receive()
-  }
-}
-
-class AddParkingSensors private (@unused context: ActorContext[RouteSlipMessage])
-    extends RouteSlip {
-  def receive(): Behavior[RouteSlipMessage] = Behaviors.receiveMessagePartial {
+object AddParkingSensors extends RouteSlip {
+  def apply(): Behavior[RouteSlipMessage] = Behaviors.receiveMessagePartial {
     case RouteSlipMessage(nextTasks, car: Car) =>
       sendMessageToNextTask(nextTasks, car.copy(hasParkingSensors = true))
       Behaviors.same
@@ -83,7 +62,7 @@ object SlipRouter {
     }
 }
 
-class SlipRouter(context: ActorContext[Order], endStep: ActorRef[Car]) extends RouteSlip {
+class SlipRouter private (context: ActorContext[Order], endStep: ActorRef[Car]) extends RouteSlip {
 
   val paintBlack: ActorRef[RouteSlipMessage]    = context.spawn(PaintCar("black"), "paintBlack")
   val paintGray: ActorRef[RouteSlipMessage]     = context.spawn(PaintCar("gray"), "paintGray")

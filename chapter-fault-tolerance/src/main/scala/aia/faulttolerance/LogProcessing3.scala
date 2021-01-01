@@ -30,12 +30,11 @@ package dbstrategy3 {
       Behaviors
         .supervise {
           Behaviors.setup[NotUsed] { context =>
-            var fileWatchers: Vector[ActorRef[FileWatcherProtocol.Command]] = sources.map {
-              source =>
-                val logProcSupervisor = context.spawnAnonymous(logProcSuperProps)
-                val fileWatcher       = context.spawnAnonymous(FileWatcher(source, logProcSupervisor))
-                context.watch(fileWatcher)
-                fileWatcher
+            var fileWatchers = sources.map { source =>
+              val logProcSupervisor = context.spawnAnonymous(logProcSuperProps)
+              val fileWatcher       = context.spawnAnonymous(FileWatcher(source, logProcSupervisor))
+              context.watch(fileWatcher)
+              fileWatcher
             }
 
             Behaviors.receiveSignal { case (_, Terminated(fileWatcher)) =>
@@ -50,38 +49,26 @@ package dbstrategy3 {
         .onFailure[DiskError](SupervisorStrategy.stop)
   }
 
-  object FileWatcher {
+  object FileWatcher extends FileWatchingAbilities {
+    import FileWatcherProtocol._
     import LogProcessingProtocol._
 
     def apply(
         sourceUri: String,
         logProcSupervisor: ActorRef[LogFile],
-    ): Behavior[FileWatcherProtocol.Command] =
-      Behaviors.setup { context =>
-        new FileWatcher(context, sourceUri, logProcSupervisor)
+    ): Behavior[FileWatcherProtocol.Command] = {
+      register(sourceUri)
+
+      Behaviors.receiveMessage {
+        case NewFile(file, _) =>
+          logProcSupervisor ! LogFile(file)
+          Behaviors.same
+        case SourceAbandoned(uri) =>
+          if (uri == sourceUri)
+            Behaviors.stopped
+          else
+            Behaviors.same
       }
-  }
-
-  class FileWatcher private (
-      context: ActorContext[FileWatcherProtocol.Command],
-      sourceUri: String,
-      logProcSupervisor: ActorRef[LogProcessingProtocol.LogFile],
-  ) extends AbstractBehavior[FileWatcherProtocol.Command](context)
-      with FileWatchingAbilities {
-    register(sourceUri)
-
-    import FileWatcherProtocol._
-    import LogProcessingProtocol._
-
-    def onMessage(msg: Command): Behavior[Command] = msg match {
-      case NewFile(file, _) =>
-        logProcSupervisor ! LogFile(file)
-        this
-      case SourceAbandoned(uri) =>
-        if (uri == sourceUri)
-          Behaviors.stopped
-        else
-          this
     }
   }
 
@@ -106,26 +93,15 @@ package dbstrategy3 {
     }
   }
 
-  object LogProcessor {
+  object LogProcessor extends LogParsing {
     import LogProcessingProtocol._
 
     def apply(dbSupervisor: ActorRef[Line]): Behavior[LogFile] =
-      Behaviors.setup { context => new LogProcessor(context, dbSupervisor) }
-  }
-
-  class LogProcessor private (
-      context: ActorContext[LogProcessingProtocol.LogFile],
-      dbSupervisor: ActorRef[LogProcessingProtocol.Line],
-  ) extends AbstractBehavior[LogProcessingProtocol.LogFile](context)
-      with LogParsing {
-    import LogProcessingProtocol._
-
-    def onMessage(msg: LogFile): Behavior[LogFile] = msg match {
-      case LogFile(file) =>
+      Behaviors.receiveMessage { case LogFile(file) =>
         val lines = parse(file)
         lines.foreach(dbSupervisor ! _)
-        this
-    }
+        Behaviors.same
+      }
   }
 
   object DbImpatientSupervisor {

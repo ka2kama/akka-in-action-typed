@@ -68,54 +68,40 @@ package dbstrategy2 {
       }
   }
 
-  object FileWatcher {
+  object FileWatcher extends FileWatchingAbilities {
     sealed trait Command
     case class NewFile(file: File, timeAdded: Long) extends Command
     case class SourceAbandoned(uri: String)         extends Command
 
-    def apply(source: String, databaseUrls: Vector[String]): Behavior[Command] =
-      Behaviors
-        .supervise[Command] {
-          Behaviors.setup { context =>
-            new FileWatcher(context, source, databaseUrls)
+    def apply(source: String, databaseUrls: Vector[String]): Behavior[Command] = {
+      val behavior = Behaviors.setup[Command] { context =>
+        register(source)
+
+        val logProcessor: ActorRef[LogProcessor.LogFile] = context.spawn(
+          LogProcessor(databaseUrls),
+          LogProcessor.name,
+        )
+
+        context.watch(logProcessor)
+
+        Behaviors
+          .receiveMessage[Command] {
+            case NewFile(file, _) =>
+              logProcessor ! LogProcessor.LogFile(file)
+              Behaviors.same
+            case SourceAbandoned(uri) =>
+              if (uri == source) {
+                context.log.info(s"$uri abandoned, stopping file watcher.")
+                Behaviors.stopped
+              } else Behaviors.same
           }
-        }
-        .onFailure[CorruptedFileException](SupervisorStrategy.resume)
-  }
+          .receiveSignal { case (_, Terminated(`logProcessor`)) =>
+            context.log.info(s"Log processor terminated, stopping file watcher.")
+            Behaviors.stopped
+          }
+      }
 
-  class FileWatcher private (
-      context: ActorContext[FileWatcher.Command],
-      source: String,
-      databaseUrls: Vector[String],
-  ) extends AbstractBehavior[FileWatcher.Command](context)
-      with FileWatchingAbilities {
-
-    import FileWatcher._
-
-    register(source)
-
-    val logProcessor: ActorRef[LogProcessor.LogFile] = context.spawn(
-      LogProcessor(databaseUrls),
-      LogProcessor.name,
-    )
-
-    context.watch(logProcessor)
-
-    override def onMessage(msg: Command): Behavior[Command] = msg match {
-      case NewFile(file, _) =>
-        logProcessor ! LogProcessor.LogFile(file)
-        this
-      case SourceAbandoned(uri) =>
-        if (uri == source) {
-          context.log.info(s"$uri abandoned, stopping file watcher.")
-          Behaviors.stopped
-        } else this
-    }
-
-    override def onSignal: PartialFunction[Signal, Behavior[Command]] = {
-      case Terminated(`logProcessor`) =>
-        context.log.info(s"Log processor terminated, stopping file watcher.")
-        Behaviors.stopped
+      Behaviors.supervise(behavior).onFailure[CorruptedFileException](SupervisorStrategy.resume)
     }
   }
 

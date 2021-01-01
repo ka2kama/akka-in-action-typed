@@ -9,8 +9,6 @@ import java.util.UUID
 
 package dbstrategy1 {
 
-  import akka.actor.typed.scaladsl.AbstractBehavior
-
   object LogProcessingApp extends App {
     val sources     = Vector("file:///source1/", "file:///source2/")
     val databaseUrl = "http://mydatabase1"
@@ -70,15 +68,15 @@ package dbstrategy1 {
           if (removed.isEmpty) {
             context.log.info("Shutting down, all file watchers have failed.")
             context.system.terminate()
-          }
-
-          receive(removed)
+            Behaviors.stopped
+          } else
+            receive(removed)
         } else
           Behaviors.same
     }
   }
 
-  object FileWatcher {
+  object FileWatcher extends FileWatchingAbilities {
     def name = s"file-watcher-${UUID.randomUUID.toString}"
 
     sealed trait Command
@@ -86,53 +84,33 @@ package dbstrategy1 {
     case class SourceAbandoned(uri: String)         extends Command
 
     def apply(source: String, logProcessor: ActorRef[LogProcessor.LogFile]): Behavior[Command] =
-      Behaviors.setup { context => new FileWatcher(context, source, logProcessor) }
+      Behaviors.setup { context =>
+        register(source)
+
+        Behaviors.receiveMessage {
+          case NewFile(file, _) =>
+            logProcessor ! LogProcessor.LogFile(file)
+            Behaviors.same
+          case SourceAbandoned(uri) =>
+            if (uri == source) Behaviors.stopped
+            else Behaviors.same
+        }
+      }
   }
 
-  class FileWatcher private (
-      context: ActorContext[FileWatcher.Command],
-      source: String,
-      logProcessor: ActorRef[LogProcessor.LogFile],
-  ) extends AbstractBehavior[FileWatcher.Command](context)
-      with FileWatchingAbilities {
-
-    import FileWatcher._
-
-    register(source)
-
-    def onMessage(msg: FileWatcher.Command): Behavior[FileWatcher.Command] = msg match {
-      case NewFile(file, _) =>
-        logProcessor ! LogProcessor.LogFile(file)
-        this
-      case SourceAbandoned(uri) =>
-        if (uri == source) Behaviors.stopped
-        else this
-    }
-  }
-
-  object LogProcessor {
+  object LogProcessor extends LogParsing {
     def name = s"log_processor_${UUID.randomUUID.toString}"
     // 新しいログファイル
     case class LogFile(file: File)
 
     def apply(dbWriter: ActorRef[DbWriter.Line]): Behavior[LogFile] =
-      Behaviors.setup { context => new LogProcessor(context, dbWriter) }
-  }
-
-  class LogProcessor private (
-      context: ActorContext[LogProcessor.LogFile],
-      dbWriter: ActorRef[DbWriter.Line],
-  ) extends AbstractBehavior[LogProcessor.LogFile](context)
-      with LogParsing {
-
-    import LogProcessor._
-
-    def onMessage(msg: LogFile): Behavior[LogFile] = msg match {
-      case LogFile(file) =>
-        val lines: Vector[DbWriter.Line] = parse(file)
-        lines.foreach(dbWriter ! _)
-        this
-    }
+      Behaviors.setup { context =>
+        Behaviors.receiveMessage { case LogFile(file) =>
+          val lines: Vector[DbWriter.Line] = parse(file)
+          lines.foreach(dbWriter ! _)
+          Behaviors.same
+        }
+      }
   }
 
   object DbWriter {

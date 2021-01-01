@@ -14,9 +14,7 @@ object TicketSeller {
   case class Ticket(id: Int)
   case class Tickets(event: String, entries: Vector[Ticket] = Vector.empty[Ticket])
 
-  def apply(event: String): Behavior[Command] = Behaviors.setup { _ =>
-    new TicketSeller(event).receive(Vector.empty)
-  }
+  def apply(event: String): Behavior[Command] = new TicketSeller(event).receive(Vector.empty)
 }
 
 class TicketSeller private (event: String) {
@@ -28,7 +26,7 @@ class TicketSeller private (event: String) {
 
       case Buy(nrOfTickets, replyTo) =>
         val entries = tickets.take(nrOfTickets)
-        if (entries.size >= nrOfTickets) {
+        if (entries.sizeIs >= nrOfTickets) {
           replyTo ! Tickets(event, entries)
           receive(tickets.drop(nrOfTickets))
         } else {
