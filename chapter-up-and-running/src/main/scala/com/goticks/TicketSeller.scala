@@ -15,24 +15,22 @@ object TicketSeller {
   case class Tickets(event: String, entries: Vector[Ticket] = Vector.empty[Ticket])
 
   def apply(event: String): Behavior[Command] = Behaviors.setup { _ =>
-    new TicketSeller(event).init()
+    new TicketSeller(event).receive(Vector.empty)
   }
 }
 
 class TicketSeller private (event: String) {
   import TicketSeller._
 
-  def init(): Behavior[Command] = next(Vector.empty)
-
-  def next(tickets: Vector[Ticket]): Behavior[Command] = {
+  def receive(tickets: Vector[Ticket]): Behavior[Command] = {
     Behaviors.receiveMessage {
-      case Add(newTickets) => next(tickets ++ newTickets)
+      case Add(newTickets) => receive(tickets ++ newTickets)
 
       case Buy(nrOfTickets, replyTo) =>
         val entries = tickets.take(nrOfTickets)
         if (entries.size >= nrOfTickets) {
           replyTo ! Tickets(event, entries)
-          next(tickets.drop(nrOfTickets))
+          receive(tickets.drop(nrOfTickets))
         } else {
           replyTo ! Tickets(event)
           Behaviors.same

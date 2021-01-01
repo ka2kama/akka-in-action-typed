@@ -28,7 +28,7 @@ object BoxOffice {
 
   def apply()(implicit timeout: Timeout): Behavior[Command] =
     Behaviors.setup { context =>
-      new BoxOffice(context).init()
+      new BoxOffice(context).receive(Map.empty)
     }
 
 }
@@ -39,9 +39,7 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
   implicit val system: ActorSystem[_] = context.system
   implicit val ec: ExecutionContext   = system.executionContext
 
-  def init(): Behavior[Command] = next(Map.empty)
-
-  def next(eventNameToSeller: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
+  def receive(eventNameToSeller: Map[String, ActorRef[TicketSeller.Command]]): Behavior[Command] =
     Behaviors.receiveMessage {
       case CreateEvent(name, tickets, replyTo) =>
         def create(): Behavior[Command] = {
@@ -49,7 +47,7 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
           val newTickets   = (1 to tickets).map(TicketSeller.Ticket.apply)
           eventTickets ! TicketSeller.Add(newTickets)
           replyTo ! EventCreated(Event(name, tickets))
-          next(eventNameToSeller + (name -> eventTickets))
+          receive(eventNameToSeller + (name -> eventTickets))
         }
         def eventExists(): Behavior[Command] = {
           replyTo ! EventExists
@@ -99,7 +97,7 @@ class BoxOffice private (context: ActorContext[BoxOffice.Command])(implicit time
         }
         def cancelEvent(seller: ActorRef[TicketSeller.Command]): Behavior[Command] = {
           seller ! TicketSeller.Cancel(replyTo)
-          next(eventNameToSeller - event)
+          receive(eventNameToSeller - event)
         }
         eventNameToSeller.get(event).fold(notFound())(cancelEvent)
     }
